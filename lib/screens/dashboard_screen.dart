@@ -39,13 +39,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   void _startTelemetry() {
-    // Use Accelerometer for "proper" absolute angle instead of Gyroscope (which only measures speed).
-    // We use the X-axis for left/right lean and atan2 to calculate the stable tilt angle.
     _accelerometerSubscription = accelerometerEventStream().listen((AccelerometerEvent event) {
-      // Calculate absolute tilt angle in degrees. 
-      // event.x is the side-to-side axis on the watch face.
       double angle = atan2(event.x, sqrt(event.y * event.y + event.z * event.z)) * (180 / pi);
-      
       setState(() {
         _smoothedLean = _leanFilter.apply(angle);
       });
@@ -53,25 +48,52 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> _startGPS() async {
-    LocationPermission permission = await Geolocator.requestPermission();
-    if (permission == LocationPermission.whileInUse ||
-        permission == LocationPermission.always) {
-      _positionSubscription =
-          Geolocator.getPositionStream(
-            locationSettings: const LocationSettings(
-              accuracy: LocationAccuracy.high,
-              distanceFilter: 1,
-            ),
-          ).listen((Position position) {
-            double speedKmh = position.speed * 3.6;
-            setState(() {
-              _currentSpeedKmh = speedKmh;
-              if (speedKmh > _maxSpeedKmh) {
-                _maxSpeedKmh = speedKmh;
-              }
-            });
-          });
+    bool serviceEnabled;
+    LocationPermission permission;
+
+    // Test if location services are enabled.
+    serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      return Future.error('Location services are disabled.');
     }
+
+    permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied) {
+        return Future.error('Location permissions are denied');
+      }
+    }
+    
+    if (permission == LocationPermission.deniedForever) {
+      return Future.error('Location permissions are permanently denied.');
+    } 
+
+    // When we reach here, permissions are granted and we can
+    // continue accessing the position of the device.
+    _positionSubscription = Geolocator.getPositionStream(
+      locationSettings: AndroidSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 0, // Receive updates as often as possible
+        intervalDuration: Duration(seconds: 1), // 1 second interval is good for speedo
+        foregroundNotificationConfig: ForegroundNotificationConfig(
+          notificationText: "T-Axis is tracking your speed",
+          notificationTitle: "Speed Tracking Active",
+          enableWakeLock: true,
+        )
+      ),
+    ).listen((Position position) {
+      // position.speed is in m/s, convert to km/h
+      double speedKmh = position.speed * 3.6;
+      if (speedKmh < 0) speedKmh = 0; // Sometimes GPS returns negative speed on error
+
+      setState(() {
+        _currentSpeedKmh = speedKmh;
+        if (speedKmh > _maxSpeedKmh) {
+          _maxSpeedKmh = speedKmh;
+        }
+      });
+    });
   }
 
   void _calibrateZero() {
@@ -87,6 +109,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _pageController.dispose();
     super.dispose();
   }
+  
   Widget _buildDot(int index) {
     return Container(
       height: 6,
@@ -122,11 +145,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     currentSpeedKmh: _currentSpeedKmh,
                     maxSpeedKmh: _maxSpeedKmh,
                   ),
-                  
                 ],
               ),
-
-              //Page Indicator
               Positioned(bottom: 10, left: 0, right: 0, child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
