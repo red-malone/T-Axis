@@ -21,7 +21,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   int _currentPage = 0;
 
   //Lean Angle State
-  StreamSubscription<GyroscopeEvent>? _gyroscopeSubscription;
+  StreamSubscription<AccelerometerEvent>? _accelerometerSubscription;
   final LowPassFilter _leanFilter = LowPassFilter(0.05);
   double _smoothedLean = 0.0;
   double _baselineOffset = 0.0;
@@ -39,12 +39,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   void _startTelemetry() {
-    _gyroscopeSubscription = gyroscopeEventStream().listen((
-      GyroscopeEvent event,
-    ) {
-      double rawDegrees = event.y * (180 / pi);
+    // Use Accelerometer for "proper" absolute angle instead of Gyroscope (which only measures speed).
+    // We use the X-axis for left/right lean and atan2 to calculate the stable tilt angle.
+    _accelerometerSubscription = accelerometerEventStream().listen((AccelerometerEvent event) {
+      // Calculate absolute tilt angle in degrees. 
+      // event.x is the side-to-side axis on the watch face.
+      double angle = atan2(event.x, sqrt(event.y * event.y + event.z * event.z)) * (180 / pi);
+      
       setState(() {
-        _smoothedLean = _leanFilter.apply(rawDegrees);
+        _smoothedLean = _leanFilter.apply(angle);
       });
     });
   }
@@ -79,7 +82,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   void dispose() {
-    _gyroscopeSubscription?.cancel();
+    _accelerometerSubscription?.cancel();
     _positionSubscription?.cancel();
     _pageController.dispose();
     super.dispose();
