@@ -111,14 +111,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   });
                 },
                 children: [
-                  SpeedFace(
-                    currentSpeedKmh: _currentSpeedKmh,
-                    maxSpeedKmh: _maxSpeedKmh,
-                  ),
                   LeanFace(
                     displayAngle: displayAngle,
                     onCalibrate: _calibrateZero,
                   ),
+                  SpeedFace(
+                    currentSpeedKmh: _currentSpeedKmh,
+                    maxSpeedKmh: _maxSpeedKmh,
+                  ),
+                  
                 ],
               ),
 

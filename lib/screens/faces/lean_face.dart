@@ -25,6 +25,9 @@ class LeanFace extends StatelessWidget {
           ),
           Text(
             '${displayAngle.abs().toStringAsFixed(1)}°',
+            // Allow the numeric angle to scale down on small screens
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: GoogleFonts.robotoMono(
               fontSize: 42,
               fontWeight: FontWeight.bold,
@@ -46,9 +49,10 @@ class LeanFace extends StatelessWidget {
           ElevatedButton(
             onPressed: onCalibrate,
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.redAccent.withValues(alpha: 0.8),
+              backgroundColor: Colors.redAccent.withOpacity(0.8),
               shape: const StadiumBorder(),
-              minimumSize: const Size(100, 30)
+              minimumSize: const Size(100, 30),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             ),
             child: Text(
               "Calibrate",
