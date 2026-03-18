@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:t_axis/page/watch_screen.dart';
+import 'package:t_axis/screens/dashboard_screen.dart';
 
 void main() {
   runApp(const MyApp());
@@ -14,11 +14,12 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'T-Axis Telemetry',
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+        brightness: Brightness.dark,
+        scaffoldBackgroundColor: Colors.black,
       ),
-      home: WatchScreen(),
+      debugShowCheckedModeBanner: false,
+
+      home:DashboardScreen(),
     );
   }
 }
-
-
