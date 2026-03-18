@@ -44,7 +44,7 @@ class SpeedFace extends StatelessWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             decoration: BoxDecoration(
-              color: Colors.blueAccent.withOpacity(0.8),
+              color: Colors.blueAccent.withValues(alpha: 0.8),
               borderRadius: BorderRadius.circular(20),
             ),
             child: FittedBox(

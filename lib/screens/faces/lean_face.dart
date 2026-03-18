@@ -49,7 +49,7 @@ class LeanFace extends StatelessWidget {
           ElevatedButton(
             onPressed: onCalibrate,
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.redAccent.withOpacity(0.8),
+              backgroundColor: Colors.redAccent.withValues(alpha: 0.8),
               shape: const StadiumBorder(),
               minimumSize: const Size(100, 30),
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
