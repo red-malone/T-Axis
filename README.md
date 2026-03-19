@@ -17,10 +17,10 @@ T-Axis is a high-performance telemetry application designed specifically for mot
 
 ## 📊 Screenshots
 
-|                 Lean Face                 |                 Speed Face                  |                     Mounting Setup                     | Mounting Setup 2                                         |
-|:-----------------------------------------:|:-------------------------------------------:|:------------------------------------------------------:|:---------------------------------------------------------|
+|                 Lean Face                 |                 Speed Face                  |                     Mounting Setup                     |                     Mounting Setup 2                     |
+|:-----------------------------------------:|:-------------------------------------------:|:------------------------------------------------------:|:--------------------------------------------------------:|
 | ![Lean Face](assets/screenshots/lean.png) | ![Speed Face](assets/screenshots/speed.png) | ![Mounting Dialog](assets/screenshots/mountdialog.png) | ![mountdialog2.png](assets/screenshots/mountdialog2.png) |
-|             *Real-time Tilt*              |               *GPS Velocity*                |                     *Axis Mapping*                     | *Axis Mapping*                                           |
+|             *Real-time Tilt*              |               *GPS Velocity*                |                     *Axis Mapping*                     |                      *Axis Mapping*                      |
 
 ## 🛠 Advanced Signal Processing
 
