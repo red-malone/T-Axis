@@ -32,6 +32,14 @@ The project includes a standalone `LowPassFilter` class in the utilities' direct
 - **Current State**: The existing lean angle calculation uses its own frequency-based smoothing via the complementary filter logic.
 - **Extensibility**: If the environment has extreme high-frequency vibrations (e.g., a high-revving single-cylinder engine) that the complementary filter doesn't suffice for, the code in `lib/utilities/lowpass_fiter.dart` can be modified and used to replace or pre-process the existing logic in `dashboard_screen.dart`.
 
+## 🔮 Future Roadmap
+
+- **Companion Phone App**: A dedicated mobile application to sync and visualize the entire history of your rides on a larger screen.
+- **Ride History & Analytics**: Deep-dive into previous sessions with GPS path mapping, speed heatmaps, and peak lean angle analysis.
+- **Target Goals**: Set "Goal Angles" for specific track sectors and receive haptic or visual feedback when you reach your target lean.
+- **Data Export**: Support for exporting telemetry data in CSV, GPX, or FIT formats for use in external analysis tools like RaceChrono or Google Earth.
+- **Cloud Synchronization**: Securely backup and sync your riding data across devices and share your best stats with the community.
+
 ## 📱 Tech Stack
 
 - **Flutter**: Modern UI framework.
