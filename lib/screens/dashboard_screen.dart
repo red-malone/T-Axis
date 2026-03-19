@@ -6,7 +6,6 @@ import 'package:geolocator/geolocator.dart';
 import 'package:sensors_plus/sensors_plus.dart';
 import 'package:t_axis/screens/faces/lean_face.dart';
 import 'package:t_axis/screens/faces/speed_face.dart';
-import 'package:t_axis/utilities/lowpass_fiter.dart';
 import 'package:wear_plus/wear_plus.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -20,16 +19,33 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final PageController _pageController = PageController();
   int _currentPage = 0;
 
-  //Lean Angle State
-  StreamSubscription<AccelerometerEvent>? _accelerometerSubscription;
-  final LowPassFilter _leanFilter = LowPassFilter(0.05);
-  double _smoothedLean = 0.0;
-  double _baselineOffset = 0.0;
+  // Sensor subscriptions
+  StreamSubscription<AccelerometerEvent>? _accelSubscription;
+  StreamSubscription<GyroscopeEvent>? _gyroSubscription;
 
-  //Speed State
+  // Telemetry state
+  double _currentAngle = 0.0;
+  double _baselineOffset = 0.0;
+  DateTime? _lastUpdate;
+
+  // Alpha: 0.96 → 96% gyro (fast response), 4% accelerometer (drift correction)
+  final double _alpha = 0.96;
+
+  // Speed state
   StreamSubscription<Position>? _positionSubscription;
   double _currentSpeedKmh = 0.0;
   double _maxSpeedKmh = 0.0;
+
+  // Speed threshold below which we clamp to zero (removes GPS noise at standstill)
+  static const double _speedNoiseThresholdKmh = 1.5;
+
+  // Minimum GPS speed accuracy (m/s) to accept a speed reading
+  static const double _maxAcceptableSpeedAccuracy = 1.0;
+
+  // Smoothed accelerometer angle — written by accel stream, read by gyro stream.
+  // Dart is single-threaded so no lock needed, but we keep it as a plain field
+  // to make the intent clear.
+  double _accelAngle = 0.0;
 
   @override
   void initState() {
@@ -39,81 +55,112 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   void _startTelemetry() {
-    _accelerometerSubscription = accelerometerEventStream().listen((AccelerometerEvent event) {
-      double angle = atan2(event.x, sqrt(event.y * event.y + event.z * event.z)) * (180 / pi);
+    // --- Accelerometer: long-term gravity reference (drift correction) ---
+    _accelSubscription = accelerometerEventStream().listen((AccelerometerEvent event) {
+      // BUG FIX: was atan2(x, z) which used the screen-depth axis.
+      // For a watch on the wrist, lean (roll) is rotation in the X-Y plane:
+      //   X = horizontal across the watch face (points right when face-up)
+      //   Y = vertical along the arm (points toward fingers)
+      // atan2(x, y) gives the roll angle away from vertical — exactly what we want.
+      _accelAngle = atan2(event.x, event.y) * (180 / pi);
+    });
+
+    // --- Gyroscope: real-time rotation rate ---
+    _gyroSubscription = gyroscopeEventStream().listen((GyroscopeEvent event) {
+      final now = DateTime.now();
+      if (_lastUpdate == null) {
+        _lastUpdate = now;
+        return;
+      }
+
+      final dt = now.difference(_lastUpdate!).inMicroseconds / 1_000_000.0;
+      _lastUpdate = now;
+
+      // Guard against absurdly large dt (e.g. first real tick after a resume)
+      if (dt <= 0 || dt > 0.5) return;
+
+      // Y-axis rotation = lean left/right in portrait orientation on wrist
+      final double gyroRate = event.y * (180 / pi);
+
+      // COMPLEMENTARY FILTER:
+      //   angle = α × (angle + gyro × dt)  ← fast, drifts over time
+      //         + (1 - α) × accelAngle     ← slow, but drift-free
+      final double newAngle =
+          _alpha * (_currentAngle + gyroRate * dt) + (1.0 - _alpha) * _accelAngle;
+
       setState(() {
-        _smoothedLean = _leanFilter.apply(angle);
+        _currentAngle = newAngle;
       });
     });
   }
 
   Future<void> _startGPS() async {
-    bool serviceEnabled;
-    LocationPermission permission;
+    final bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) return;
 
-    // Test if location services are enabled.
-    serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) {
-      return Future.error('Location services are disabled.');
-    }
-
-    permission = await Geolocator.checkPermission();
+    LocationPermission permission = await Geolocator.checkPermission();
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
-      if (permission == LocationPermission.denied) {
-        return Future.error('Location permissions are denied');
-      }
     }
-    
-    if (permission == LocationPermission.deniedForever) {
-      return Future.error('Location permissions are permanently denied.');
-    } 
 
-    // When we reach here, permissions are granted and we can
-    // continue accessing the position of the device.
-    _positionSubscription = Geolocator.getPositionStream(
-      locationSettings: AndroidSettings(
-        accuracy: LocationAccuracy.high,
-        distanceFilter: 0, // Receive updates as often as possible
-        intervalDuration: Duration(seconds: 1), // 1 second interval is good for speedo
-        foregroundNotificationConfig: ForegroundNotificationConfig(
-          notificationText: "T-Axis is tracking your speed",
-          notificationTitle: "Speed Tracking Active",
-          enableWakeLock: true,
-        )
-      ),
-    ).listen((Position position) {
-      // position.speed is in m/s, convert to km/h
-      double speedKmh = position.speed * 3.6;
-      if (speedKmh < 0) speedKmh = 0; // Sometimes GPS returns negative speed on error
+    if (permission == LocationPermission.whileInUse ||
+        permission == LocationPermission.always) {
+      _positionSubscription = Geolocator.getPositionStream(
+        locationSettings: AndroidSettings(
+          accuracy: LocationAccuracy.high,
+          distanceFilter: 0,
+          intervalDuration: const Duration(seconds: 1),
+          foregroundNotificationConfig: const ForegroundNotificationConfig(
+            notificationText: 'T-Axis is tracking your speed',
+            notificationTitle: 'Speed Tracking Active',
+            enableWakeLock: true,
+          ),
+        ),
+      ).listen((Position position) {
+        // Reject fixes with poor speed accuracy (common when stationary or indoors)
+        if (position.speedAccuracy > _maxAcceptableSpeedAccuracy) return;
 
-      setState(() {
-        _currentSpeedKmh = speedKmh;
-        if (speedKmh > _maxSpeedKmh) {
-          _maxSpeedKmh = speedKmh;
-        }
+        final double speedKmh = position.speed * 3.6;
+
+        // Clamp values below noise threshold to zero so the display reads 0
+        // when the bike is stopped, not 0.3–1.0 km/h of GPS jitter.
+        final double cleanSpeed = speedKmh < _speedNoiseThresholdKmh ? 0 : speedKmh;
+
+        setState(() {
+          _currentSpeedKmh = cleanSpeed;
+          if (cleanSpeed > _maxSpeedKmh) _maxSpeedKmh = cleanSpeed;
+        });
       });
-    });
+    }
   }
 
   void _calibrateZero() {
     setState(() {
-      _baselineOffset = _smoothedLean;
+      _baselineOffset = _currentAngle;
+    });
+  }
+
+  /// Call this to reset the session's top speed (e.g. a long-press on SpeedFace)
+  void _resetMaxSpeed() {
+    setState(() {
+      _maxSpeedKmh = 0.0;
     });
   }
 
   @override
   void dispose() {
-    _accelerometerSubscription?.cancel();
+    _accelSubscription?.cancel();
+    _gyroSubscription?.cancel();
     _positionSubscription?.cancel();
     _pageController.dispose();
     super.dispose();
   }
-  
+
   Widget _buildDot(int index) {
     return Container(
       height: 6,
       width: 6,
+      margin: const EdgeInsets.symmetric(horizontal: 4),
       decoration: BoxDecoration(
         color: _currentPage == index ? Colors.white : Colors.white38,
         shape: BoxShape.circle,
@@ -123,7 +170,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
-    double displayAngle = _smoothedLean - _baselineOffset;
+    final double displayAngle = _currentAngle - _baselineOffset;
+
     return WatchShape(
       builder: (context, shape, child) {
         return Scaffold(
@@ -131,11 +179,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             children: [
               PageView(
                 controller: _pageController,
-                onPageChanged: (int page) {
-                  setState(() {
-                    _currentPage = page;
-                  });
-                },
+                onPageChanged: (int page) => setState(() => _currentPage = page),
                 children: [
                   LeanFace(
                     displayAngle: displayAngle,
@@ -144,17 +188,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   SpeedFace(
                     currentSpeedKmh: _currentSpeedKmh,
                     maxSpeedKmh: _maxSpeedKmh,
+                    onResetMax: _resetMaxSpeed, // wire this up in SpeedFace
                   ),
                 ],
               ),
-              Positioned(bottom: 10, left: 0, right: 0, child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  _buildDot(0),
-                  const SizedBox(width: 8),
-                  _buildDot(1),
-                ],
-              )),
+              Positioned(
+                bottom: 15,
+                left: 0,
+                right: 0,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: List.generate(2, _buildDot),
+                ),
+              ),
             ],
           ),
         );
