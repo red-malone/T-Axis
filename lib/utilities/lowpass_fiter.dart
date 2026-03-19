@@ -1,4 +1,8 @@
 // low_pass_filter.dart
+/* This is an unused functionality of the app. Can be used to replace the existing lowpass
+ filter which is the current angle in the dashboard screen
+ If needed can be used when further scaling the application for further complex mathematical issues
+*/
 
 /// A simple exponential moving average (EMA) low-pass filter.
 ///

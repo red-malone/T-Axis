@@ -1,12 +1,19 @@
+// lib/screens/dashboard_screen.dart
+
 import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:sensors_plus/sensors_plus.dart';
+import 'package:t_axis/models/mounting_mode.dart';
 import 'package:t_axis/screens/faces/lean_face.dart';
 import 'package:t_axis/screens/faces/speed_face.dart';
 import 'package:wear_plus/wear_plus.dart';
+
+// NOTE: LowPassFilter has been removed entirely.
+// The complementary filter below already acts as a low-pass filter on the
+// accelerometer channel. A second filter on top would add lag with no benefit.
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -23,29 +30,51 @@ class _DashboardScreenState extends State<DashboardScreen> {
   StreamSubscription<AccelerometerEvent>? _accelSubscription;
   StreamSubscription<GyroscopeEvent>? _gyroSubscription;
 
-  // Telemetry state
+  // Complementary filter state
   double _currentAngle = 0.0;
   double _baselineOffset = 0.0;
   DateTime? _lastUpdate;
 
-  // Alpha: 0.96 → 96% gyro (fast response), 4% accelerometer (drift correction)
+  // 96% gyro (fast response), 4% accel (drift correction)
   final double _alpha = 0.96;
+
+  // Written by accel stream, read by gyro stream.
+  // Safe in Dart's single-threaded model.
+  double _accelAngle = 0.0;
+
+  // --- Mounting calibration ---
+  MountingMode _mountingMode = MountingMode.leftWrist;
+
+  // Only relevant for handlebar mode: user can flip the lean direction if
+  // the watch is rotated 180° on the bar.
+  bool _handlebarDirectionFlipped = false;
 
   // Speed state
   StreamSubscription<Position>? _positionSubscription;
   double _currentSpeedKmh = 0.0;
   double _maxSpeedKmh = 0.0;
 
-  // Speed threshold below which we clamp to zero (removes GPS noise at standstill)
   static const double _speedNoiseThresholdKmh = 1.5;
-
-  // Minimum GPS speed accuracy (m/s) to accept a speed reading
   static const double _maxAcceptableSpeedAccuracy = 1.0;
 
-  // Smoothed accelerometer angle — written by accel stream, read by gyro stream.
-  // Dart is single-threaded so no lock needed, but we keep it as a plain field
-  // to make the intent clear.
-  double _accelAngle = 0.0;
+  // -------------------------------------------------------------------------
+  // Direction multiplier
+  //
+  // Left wrist  → atan2(x,y) gives the correct sign.
+  // Right wrist → X-axis mirrors physically; flip sign to compensate.
+  // Handlebar   → starts with no flip, but user may invert via UI if the
+  //               watch is rotated 180° on the bar.
+  // -------------------------------------------------------------------------
+  double get _directionMultiplier {
+    switch (_mountingMode) {
+      case MountingMode.leftWrist:
+        return 1.0;
+      case MountingMode.rightWrist:
+        return -1.0;
+      case MountingMode.handlebar:
+        return _handlebarDirectionFlipped ? -1.0 : 1.0;
+    }
+  }
 
   @override
   void initState() {
@@ -55,43 +84,33 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   void _startTelemetry() {
-    // --- Accelerometer: long-term gravity reference (drift correction) ---
-    _accelSubscription = accelerometerEventStream().listen((AccelerometerEvent event) {
-      // BUG FIX: was atan2(x, z) which used the screen-depth axis.
-      // For a watch on the wrist, lean (roll) is rotation in the X-Y plane:
-      //   X = horizontal across the watch face (points right when face-up)
-      //   Y = vertical along the arm (points toward fingers)
-      // atan2(x, y) gives the roll angle away from vertical — exactly what we want.
-      _accelAngle = atan2(event.x, event.y) * (180 / pi);
-    });
+    _accelSubscription =
+        accelerometerEventStream().listen((AccelerometerEvent event) {
+          // Roll angle in the X-Y plane.
+          // X = across the watch face, Y = along the arm toward fingers.
+          _accelAngle = atan2(event.x, event.y) * (180 / pi);
+        });
 
-    // --- Gyroscope: real-time rotation rate ---
-    _gyroSubscription = gyroscopeEventStream().listen((GyroscopeEvent event) {
-      final now = DateTime.now();
-      if (_lastUpdate == null) {
-        _lastUpdate = now;
-        return;
-      }
+    _gyroSubscription =
+        gyroscopeEventStream().listen((GyroscopeEvent event) {
+          final now = DateTime.now();
+          if (_lastUpdate == null) {
+            _lastUpdate = now;
+            return;
+          }
 
-      final dt = now.difference(_lastUpdate!).inMicroseconds / 1_000_000.0;
-      _lastUpdate = now;
+          final dt = now.difference(_lastUpdate!).inMicroseconds / 1_000_000.0;
+          _lastUpdate = now;
 
-      // Guard against absurdly large dt (e.g. first real tick after a resume)
-      if (dt <= 0 || dt > 0.5) return;
+          // Guard: ignore first tick after sleep/resume to avoid angle spike
+          if (dt <= 0 || dt > 0.5) return;
 
-      // Y-axis rotation = lean left/right in portrait orientation on wrist
-      final double gyroRate = event.y * (180 / pi);
+          final double gyroRate = event.y * (180 / pi);
+          final double newAngle =
+              _alpha * (_currentAngle + gyroRate * dt) + (1.0 - _alpha) * _accelAngle;
 
-      // COMPLEMENTARY FILTER:
-      //   angle = α × (angle + gyro × dt)  ← fast, drifts over time
-      //         + (1 - α) × accelAngle     ← slow, but drift-free
-      final double newAngle =
-          _alpha * (_currentAngle + gyroRate * dt) + (1.0 - _alpha) * _accelAngle;
-
-      setState(() {
-        _currentAngle = newAngle;
-      });
-    });
+          setState(() => _currentAngle = newAngle);
+        });
   }
 
   Future<void> _startGPS() async {
@@ -117,14 +136,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
         ),
       ).listen((Position position) {
-        // Reject fixes with poor speed accuracy (common when stationary or indoors)
         if (position.speedAccuracy > _maxAcceptableSpeedAccuracy) return;
 
         final double speedKmh = position.speed * 3.6;
-
-        // Clamp values below noise threshold to zero so the display reads 0
-        // when the bike is stopped, not 0.3–1.0 km/h of GPS jitter.
-        final double cleanSpeed = speedKmh < _speedNoiseThresholdKmh ? 0 : speedKmh;
+        final double cleanSpeed =
+        speedKmh < _speedNoiseThresholdKmh ? 0 : speedKmh;
 
         setState(() {
           _currentSpeedKmh = cleanSpeed;
@@ -134,17 +150,30 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
+  // Zero out the current angle — works the same regardless of mounting mode.
   void _calibrateZero() {
+    setState(() => _baselineOffset = _currentAngle);
+  }
+
+  // Only available in handlebar mode: flips which side is "left" vs "right".
+  void _flipHandlebarDirection() {
+    setState(() => _handlebarDirectionFlipped = !_handlebarDirectionFlipped);
+  }
+
+  void _onMountingModeChanged(MountingMode mode) {
     setState(() {
+      _mountingMode = mode;
+      // Reset direction flip whenever the mode changes so there is no
+      // stale flip from a previous handlebar session.
+      _handlebarDirectionFlipped = false;
+      // Also reset the angle baseline since the sensor axes now mean
+      // something different.
       _baselineOffset = _currentAngle;
     });
   }
 
-  /// Call this to reset the session's top speed (e.g. a long-press on SpeedFace)
   void _resetMaxSpeed() {
-    setState(() {
-      _maxSpeedKmh = 0.0;
-    });
+    setState(() => _maxSpeedKmh = 0.0);
   }
 
   @override
@@ -170,7 +199,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final double displayAngle = _currentAngle - _baselineOffset;
+    // Apply baseline offset then direction multiplier.
+    final double displayAngle =
+        (_currentAngle - _baselineOffset) * _directionMultiplier;
 
     return WatchShape(
       builder: (context, shape, child) {
@@ -179,16 +210,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
             children: [
               PageView(
                 controller: _pageController,
-                onPageChanged: (int page) => setState(() => _currentPage = page),
+                onPageChanged: (int page) =>
+                    setState(() => _currentPage = page),
                 children: [
                   LeanFace(
                     displayAngle: displayAngle,
+                    mountingMode: _mountingMode,
+                    handlebarDirectionFlipped: _handlebarDirectionFlipped,
                     onCalibrate: _calibrateZero,
+                    onMountingModeChanged: _onMountingModeChanged,
+                    onFlipHandlebarDirection: _flipHandlebarDirection,
                   ),
                   SpeedFace(
                     currentSpeedKmh: _currentSpeedKmh,
                     maxSpeedKmh: _maxSpeedKmh,
-                    onResetMax: _resetMaxSpeed, // wire this up in SpeedFace
+                    onResetMax: _resetMaxSpeed,
                   ),
                 ],
               ),
