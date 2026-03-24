@@ -51,4 +51,4 @@ firebase_options.dart
 
 firebase_options.dart
 firebase.json
-android/app/google-services.json
+google-services.json
