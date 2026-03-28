@@ -2,7 +2,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:t_axis/models/mounting_mode.dart';
+import 'package:t_axis/core/models/mounting_mode.dart';
 
 import '../../widgets/mounting_dialog.dart';
 

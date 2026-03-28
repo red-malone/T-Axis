@@ -6,9 +6,9 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:sensors_plus/sensors_plus.dart';
-import 'package:t_axis/models/mounting_mode.dart';
-import 'package:t_axis/screens/watch_face/lean_face.dart';
-import 'package:t_axis/screens/watch_face/speed_face.dart';
+import 'package:t_axis/core/models/mounting_mode.dart';
+import 'package:t_axis/watch/screens/watch_face/lean_face.dart';
+import 'package:t_axis/watch/screens/watch_face/speed_face.dart';
 import 'package:wear_plus/wear_plus.dart';
 
 // NOTE: LowPassFilter has been removed entirely.

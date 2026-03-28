@@ -5,7 +5,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-import '../models/mounting_mode.dart';
+import '../../core/models/mounting_mode.dart';
 
 class MountingDialog extends StatefulWidget {
   final MountingMode current;
