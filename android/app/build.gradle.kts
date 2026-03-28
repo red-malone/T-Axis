@@ -23,20 +23,34 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
+        // Base Application ID
         applicationId = "com.example.t_axis"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
 
+    // 1. Add the flavor dimension
+    flavorDimensions += "platform"
+
+    // 2. Define the Watch and Mobile flavors using Kotlin DSL syntax
+    productFlavors {
+        create("watch") {
+            dimension = "platform"
+            applicationIdSuffix = ".watch"
+            versionNameSuffix = "-watch"
+            // Wear OS strictly requires at least SDK 23
+            minSdk = 23
+        }
+        create("mobile") {
+            dimension = "platform"
+            // The mobile app inherits the base configurations
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
         }
     }
