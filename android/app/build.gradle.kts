@@ -38,10 +38,12 @@ android {
     productFlavors {
         create("watch") {
             dimension = "platform"
-            applicationIdSuffix = ".watch"
+            // Use the same applicationId as the base app so it matches
+            // the existing google-services.json client entry.
+            applicationId = "com.example.t_axis"
             versionNameSuffix = "-watch"
             // Wear OS strictly requires at least SDK 23
-            minSdk = 23
+            minSdk = flutter.minSdkVersion
         }
         create("mobile") {
             dimension = "platform"

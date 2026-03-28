@@ -5,6 +5,14 @@ class HomeScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Placeholder();
+    return const Scaffold(
+      body: Center(
+        child: Text(
+          'Welcome to T-Axis Companion!\n\nYour rides will appear here once synced.',
+          textAlign: TextAlign.center,
+          style: TextStyle(fontSize: 18, color: Colors.white70),
+        ),
+      ),
+    );
   }
 }
