@@ -1,8 +1,6 @@
 // lib/screens/dashboard_screen.dart
-
 import 'dart:async';
 import 'dart:math';
-
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:sensors_plus/sensors_plus.dart';
@@ -10,6 +8,7 @@ import 'package:t_axis/core/models/mounting_mode.dart';
 import 'package:t_axis/watch/screens/watch_face/lean_face.dart';
 import 'package:t_axis/watch/screens/watch_face/speed_face.dart';
 import 'package:wear_plus/wear_plus.dart';
+import 'package:t_axis/core/utilities/db_helper.dart';
 
 // NOTE: LowPassFilter has been removed entirely.
 // The complementary filter below already acts as a low-pass filter on the
@@ -53,6 +52,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
   StreamSubscription<Position>? _positionSubscription;
   double _currentSpeedKmh = 0.0;
   double _maxSpeedKmh = 0.0;
+
+  // Recording (ride) state
+  bool _isRecording = false;
+  final List<Map<String, double>> _routeData = [];
+  double _rideTopSpeedKmh = 0.0;
+  double _rideMaxLeanAngle = 0.0;
 
   static const double _speedNoiseThresholdKmh = 1.5;
   static const double _maxAcceptableSpeedAccuracy = 1.0;
@@ -111,6 +116,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
           (1.0 - _alpha) * _accelAngle;
 
       setState(() => _currentAngle = newAngle);
+
+      // If recording, update ride max lean angle
+      if (_isRecording) {
+        final double displayAngle =
+            (_currentAngle - _baselineOffset) * _directionMultiplier;
+        final double absAngle = displayAngle.abs();
+        if (absAngle > _rideMaxLeanAngle) _rideMaxLeanAngle = absAngle;
+      }
     });
   }
 
@@ -156,8 +169,56 @@ class _DashboardScreenState extends State<DashboardScreen> {
             setState(() {
               _currentSpeedKmh = cleanSpeed;
               if (cleanSpeed > _maxSpeedKmh) _maxSpeedKmh = cleanSpeed;
+              if (_isRecording) {
+                // Record point for the current ride
+                _routeData.add({
+                  'lat': position.latitude,
+                  'lng': position.longitude,
+                  'speed': cleanSpeed,
+                });
+                if (cleanSpeed > _rideTopSpeedKmh) {
+                  _rideTopSpeedKmh = cleanSpeed;
+                }
+              }
             });
           });
+    }
+  }
+
+  void _startRide() {
+    setState(() {
+      _isRecording = true;
+      _routeData.clear();
+      _rideTopSpeedKmh = 0.0;
+      _rideMaxLeanAngle = 0.0;
+      _maxSpeedKmh = 0.0;
+    });
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Ride started — recording data')),
+    );
+  }
+
+  Future<void> _stopRide() async {
+    setState(() => _isRecording = false);
+
+    // Persist to local DB
+    try {
+      await DatabaseHelper.instance.insertRide(
+        topSpeed: _rideTopSpeedKmh,
+        maxLean: _rideMaxLeanAngle,
+        routeData: List<Map<String, double>>.from(_routeData),
+      );
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Ride saved locally')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to save ride: $e')));
     }
   }
 
@@ -246,6 +307,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: List.generate(2, _buildDot),
+                ),
+              ),
+              Positioned(
+                bottom: 70,
+                left: 0,
+                right: 0,
+                child: Center(
+                  child: FloatingActionButton(
+                    mini: true,
+                    backgroundColor: _isRecording
+                        ? Colors.redAccent
+                        : Colors.green,
+                    onPressed: () async {
+                      if (_isRecording) {
+                        await _stopRide();
+                      } else {
+                        _startRide();
+                      }
+                    },
+                    child: Icon(_isRecording ? Icons.stop : Icons.play_arrow),
+                    tooltip: _isRecording ? 'Stop ride' : 'Start ride',
+                  ),
                 ),
               ),
             ],
