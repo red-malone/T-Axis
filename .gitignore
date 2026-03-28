@@ -52,3 +52,6 @@ firebase_options.dart
 firebase_options.dart
 firebase.json
 google-services.json
+
+# personal needed file 
+new.sh

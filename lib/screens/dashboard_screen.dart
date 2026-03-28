@@ -7,8 +7,8 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:sensors_plus/sensors_plus.dart';
 import 'package:t_axis/models/mounting_mode.dart';
-import 'package:t_axis/screens/faces/lean_face.dart';
-import 'package:t_axis/screens/faces/speed_face.dart';
+import 'package:t_axis/screens/watch_face/lean_face.dart';
+import 'package:t_axis/screens/watch_face/speed_face.dart';
 import 'package:wear_plus/wear_plus.dart';
 
 // NOTE: LowPassFilter has been removed entirely.
@@ -84,33 +84,34 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   void _startTelemetry() {
-    _accelSubscription =
-        accelerometerEventStream().listen((AccelerometerEvent event) {
-          // Roll angle in the X-Y plane.
-          // X = across the watch face, Y = along the arm toward fingers.
-          _accelAngle = atan2(event.x, event.y) * (180 / pi);
-        });
+    _accelSubscription = accelerometerEventStream().listen((
+      AccelerometerEvent event,
+    ) {
+      // Roll angle in the X-Y plane.
+      // X = across the watch face, Y = along the arm toward fingers.
+      _accelAngle = atan2(event.x, event.y) * (180 / pi);
+    });
 
-    _gyroSubscription =
-        gyroscopeEventStream().listen((GyroscopeEvent event) {
-          final now = DateTime.now();
-          if (_lastUpdate == null) {
-            _lastUpdate = now;
-            return;
-          }
+    _gyroSubscription = gyroscopeEventStream().listen((GyroscopeEvent event) {
+      final now = DateTime.now();
+      if (_lastUpdate == null) {
+        _lastUpdate = now;
+        return;
+      }
 
-          final dt = now.difference(_lastUpdate!).inMicroseconds / 1_000_000.0;
-          _lastUpdate = now;
+      final dt = now.difference(_lastUpdate!).inMicroseconds / 1_000_000.0;
+      _lastUpdate = now;
 
-          // Guard: ignore first tick after sleep/resume to avoid angle spike
-          if (dt <= 0 || dt > 0.5) return;
+      // Guard: ignore first tick after sleep/resume to avoid angle spike
+      if (dt <= 0 || dt > 0.5) return;
 
-          final double gyroRate = event.y * (180 / pi);
-          final double newAngle =
-              _alpha * (_currentAngle + gyroRate * dt) + (1.0 - _alpha) * _accelAngle;
+      final double gyroRate = event.y * (180 / pi);
+      final double newAngle =
+          _alpha * (_currentAngle + gyroRate * dt) +
+          (1.0 - _alpha) * _accelAngle;
 
-          setState(() => _currentAngle = newAngle);
-        });
+      setState(() => _currentAngle = newAngle);
+    });
   }
 
   Future<void> _startGPS() async {
@@ -124,29 +125,39 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     if (permission == LocationPermission.whileInUse ||
         permission == LocationPermission.always) {
-      _positionSubscription = Geolocator.getPositionStream(
-        locationSettings: AndroidSettings(
-          accuracy: LocationAccuracy.high,
-          distanceFilter: 0,
-          intervalDuration: const Duration(seconds: 1),
-          foregroundNotificationConfig: const ForegroundNotificationConfig(
-            notificationText: 'T-Axis is tracking your speed',
-            notificationTitle: 'Speed Tracking Active',
-            enableWakeLock: true,
-          ),
-        ),
-      ).listen((Position position) {
-        if (position.speedAccuracy > _maxAcceptableSpeedAccuracy) return;
+      _positionSubscription =
+          Geolocator.getPositionStream(
+            locationSettings: AndroidSettings(
+              accuracy: LocationAccuracy.high,
+              distanceFilter: 0,
+              intervalDuration: const Duration(seconds: 1),
+              foregroundNotificationConfig: const ForegroundNotificationConfig(
+                notificationText: 'T-Axis is tracking your speed',
+                notificationTitle: 'Speed Tracking Active',
+                enableWakeLock: true,
+              ),
+            ),
+          ).listen((Position position) {
+            // Some platforms may provide null or negative values; guard them.
+            final double? speedAccuracy = position.speedAccuracy;
+            if (speedAccuracy != null &&
+                speedAccuracy > _maxAcceptableSpeedAccuracy) {
+              return;
+            }
 
-        final double speedKmh = position.speed * 3.6;
-        final double cleanSpeed =
-        speedKmh < _speedNoiseThresholdKmh ? 0 : speedKmh;
+            double rawSpeed = position.speed;
+            if (rawSpeed.isNaN || rawSpeed < 0) rawSpeed = 0.0;
 
-        setState(() {
-          _currentSpeedKmh = cleanSpeed;
-          if (cleanSpeed > _maxSpeedKmh) _maxSpeedKmh = cleanSpeed;
-        });
-      });
+            final double speedKmh = rawSpeed * 3.6;
+            final double cleanSpeed = speedKmh < _speedNoiseThresholdKmh
+                ? 0.0
+                : speedKmh;
+
+            setState(() {
+              _currentSpeedKmh = cleanSpeed;
+              if (cleanSpeed > _maxSpeedKmh) _maxSpeedKmh = cleanSpeed;
+            });
+          });
     }
   }
 
