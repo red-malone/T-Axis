@@ -6,6 +6,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:flutter/services.dart';
 import 'package:sensors_plus/sensors_plus.dart';
 import 'package:t_axis/core/models/mounting_mode.dart';
+import 'package:t_axis/core/utilities/lean_corrector.dart';
 import 'package:t_axis/watch/screens/watch_face/lean_face.dart';
 import 'package:t_axis/watch/screens/watch_face/speed_face.dart';
 import 'package:wear_plus/wear_plus.dart';
@@ -64,6 +65,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   static const double _speedNoiseThresholdKmh = 1.5;
   static const double _maxAcceptableSpeedAccuracy = 1.0;
+
+  //Lean correction controller
+  final LeanCorrector _leanCorrector = LeanCorrector();
 
   // -------------------------------------------------------------------------
   // Direction multiplier
@@ -147,6 +151,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
       if (dt <= 0 || dt > 0.5) return;
 
       final double gyroRate = event.y * (180 / pi);
+      // Let the lean corrector observe the raw gyro rate at full fidelity.
+      _leanCorrector.updateGyroRate(gyroRate);
       final double newAngle =
           _alpha * (_currentAngle + gyroRate * dt) +
           (1.0 - _alpha) * _accelAngle;
@@ -156,8 +162,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
       _currentAngle = newAngle;
 
       // Let the recorder observe the display angle at full rate
-      final double displayAngle =
+      final double rawAngle =
           (_currentAngle - _baselineOffset) * _directionMultiplier;
+
+      final double displayAngle;
+      if (_mountingMode == MountingMode.handlebar) {
+        // Handlebar = rigid coupling, no wrist correction needed
+        displayAngle = rawAngle;
+      } else {
+        // Left/right wrist — apply GPS-learned correction
+        displayAngle = _leanCorrector.correct(
+          rawAngle,
+          _currentSpeedKmh / 3.6, // convert to m/s
+        );
+      }
       _rideRecorder.recordAngle(displayAngle);
 
       // Throttle UI updates to ~30 Hz (33 ms)
@@ -199,9 +217,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ).listen(
             (Position position) {
               // Some platforms may provide null or negative values; guard them.
-              final speedAccuracy = position.speedAccuracy;
-              if (speedAccuracy != null &&
-                  speedAccuracy > _maxAcceptableSpeedAccuracy) {
+              //To correct the lean angle using the GPS data, we need to feed the current position into the lean corrector. This allows it to compute the GPS-derived lean angle and update its correction offset when in a steady turn.
+              _leanCorrector.updatePosition(position);
+              final double speedAccuracy = position.speedAccuracy;
+              if (speedAccuracy > _maxAcceptableSpeedAccuracy) {
                 return;
               }
 
@@ -252,6 +271,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
       // Also reset the angle baseline since the sensor axes now mean
       // something different.
       _baselineOffset = _currentAngle;
+      //reset if mounting has changed
+      _leanCorrector.resetCalibration();
     });
   }
 
