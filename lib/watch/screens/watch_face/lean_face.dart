@@ -13,6 +13,10 @@ class LeanFace extends StatelessWidget {
   final VoidCallback onCalibrate;
   final ValueChanged<MountingMode> onMountingModeChanged;
   final VoidCallback onFlipHandlebarDirection;
+  // Recording HUD props
+  final bool isRecording;
+  final String recordingLabel;
+  final VoidCallback onToggleRecording;
 
   static const double _deadZone = 0.5;
 
@@ -24,6 +28,9 @@ class LeanFace extends StatelessWidget {
     required this.onCalibrate,
     required this.onMountingModeChanged,
     required this.onFlipHandlebarDirection,
+    this.isRecording = false,
+    this.recordingLabel = 'REC',
+    required this.onToggleRecording,
   });
 
   void _showMountingDialog(BuildContext context) {
@@ -91,25 +98,79 @@ class LeanFace extends StatelessWidget {
             ),
 
             const SizedBox(height: 6), // was 12 — key contributor to overflow
-
-            // Mounting mode badge
-            GestureDetector(
-              onTap: () => _showMountingDialog(context),
-              child: Container(
-                padding:
-                const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-                decoration: BoxDecoration(
-                  color: Colors.white12,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  mountingMode.label,
-                  style: GoogleFonts.robotoMono(
-                    fontSize: 11,
-                    color: Colors.white60,
+            // Mounting mode badge + recording HUD in a single row
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                GestureDetector(
+                  onTap: () => _showMountingDialog(context),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white12,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      mountingMode.label,
+                      style: GoogleFonts.robotoMono(
+                        fontSize: 11,
+                        color: Colors.white60,
+                      ),
+                    ),
                   ),
                 ),
-              ),
+                const SizedBox(width: 8),
+                // Compact recording HUD (tap to toggle)
+                GestureDetector(
+                  onTap: onToggleRecording,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.35),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    constraints: const BoxConstraints(minWidth: 44),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color: isRecording
+                                ? Colors.redAccent
+                                : Colors.white38,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Text(
+                            recordingLabel,
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.robotoMono(
+                              fontSize: 11,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Icon(
+                          isRecording ? Icons.stop : Icons.play_arrow,
+                          size: 14,
+                          color: Colors.white,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
             ),
 
             const SizedBox(height: 6), // was 10
@@ -120,8 +181,10 @@ class LeanFace extends StatelessWidget {
                 backgroundColor: Colors.redAccent.withValues(alpha: 0.8),
                 shape: const StadiumBorder(),
                 minimumSize: const Size(90, 28), // was Size(100,30)
-                padding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
               ),
               child: Text(
                 'Calibrate',
@@ -137,4 +200,3 @@ class LeanFace extends StatelessWidget {
     );
   }
 }
-

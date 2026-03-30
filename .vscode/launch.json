@@ -1,0 +1,26 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        
+        {
+            "name": "T-Axis (Mobile)",
+            "request": "launch",
+            "type": "dart",
+            "program": "lib/main_mobile.dart",
+            "args": [
+                "--flavor",
+                "mobile"
+            ]
+        },
+        {
+            "name": "T-Axis (Watch)",
+            "request": "launch",
+            "type": "dart",
+            "program": "lib/main_watch.dart",
+            "args": [
+                "--flavor",
+                "watch"
+            ]
+        }
+    ]
+}

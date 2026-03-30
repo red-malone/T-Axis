@@ -3,12 +3,14 @@ import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:flutter/services.dart';
 import 'package:sensors_plus/sensors_plus.dart';
 import 'package:t_axis/core/models/mounting_mode.dart';
 import 'package:t_axis/watch/screens/watch_face/lean_face.dart';
 import 'package:t_axis/watch/screens/watch_face/speed_face.dart';
 import 'package:wear_plus/wear_plus.dart';
-import 'package:t_axis/core/utilities/db_helper.dart';
+import 'package:t_axis/watch/controllers/ride_recorder.dart';
+import 'package:t_axis/watch/controllers/max_speed_tracker.dart';
 
 // NOTE: LowPassFilter has been removed entirely.
 // The complementary filter below already acts as a low-pass filter on the
@@ -36,6 +38,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   // 96% gyro (fast response), 4% accel (drift correction)
   final double _alpha = 0.96;
+  // Throttle UI updates from high-rate sensors to ~30Hz
+  DateTime? _lastUiUpdate;
 
   // Written by accel stream, read by gyro stream.
   // Safe in Dart's single-threaded model.
@@ -51,13 +55,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
   // Speed state
   StreamSubscription<Position>? _positionSubscription;
   double _currentSpeedKmh = 0.0;
-  double _maxSpeedKmh = 0.0;
+  final MaxSpeedTracker _speedTracker = MaxSpeedTracker();
 
-  // Recording (ride) state
-  bool _isRecording = false;
-  final List<Map<String, double>> _routeData = [];
-  double _rideTopSpeedKmh = 0.0;
-  double _rideMaxLeanAngle = 0.0;
+  // Recording controller
+  final RideRecorder _rideRecorder = RideRecorder();
+  DateTime? _recordStartTime;
+  Timer? _recordTimer;
 
   static const double _speedNoiseThresholdKmh = 1.5;
   static const double _maxAcceptableSpeedAccuracy = 1.0;
@@ -78,6 +81,39 @@ class _DashboardScreenState extends State<DashboardScreen> {
         return -1.0;
       case MountingMode.handlebar:
         return _handlebarDirectionFlipped ? -1.0 : 1.0;
+    }
+  }
+
+  void _startRide() {
+    setState(() {
+      _rideRecorder.start();
+      _speedTracker.reset();
+      _currentSpeedKmh = 0.0;
+    });
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Ride started — recording data')),
+    );
+  }
+
+  Future<void> _stopRide() async {
+    // Stop and persist via recorder
+    setState(() {});
+    try {
+      await _rideRecorder.stop();
+      // Clear HUD timer/state
+      _recordTimer?.cancel();
+      _recordTimer = null;
+      _recordStartTime = null;
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Ride saved locally')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to save ride: $e')));
     }
   }
 
@@ -115,21 +151,31 @@ class _DashboardScreenState extends State<DashboardScreen> {
           _alpha * (_currentAngle + gyroRate * dt) +
           (1.0 - _alpha) * _accelAngle;
 
-      setState(() => _currentAngle = newAngle);
+      // Always update internal angle (used by recorder), but only trigger
+      // a Flutter rebuild at a throttled rate to avoid UI jank.
+      _currentAngle = newAngle;
 
-      // If recording, update ride max lean angle
-      if (_isRecording) {
-        final double displayAngle =
-            (_currentAngle - _baselineOffset) * _directionMultiplier;
-        final double absAngle = displayAngle.abs();
-        if (absAngle > _rideMaxLeanAngle) _rideMaxLeanAngle = absAngle;
+      // Let the recorder observe the display angle at full rate
+      final double displayAngle =
+          (_currentAngle - _baselineOffset) * _directionMultiplier;
+      _rideRecorder.recordAngle(displayAngle);
+
+      // Throttle UI updates to ~30 Hz (33 ms)
+      final nowUi = DateTime.now();
+      if (_lastUiUpdate == null ||
+          nowUi.difference(_lastUiUpdate!).inMilliseconds >= 33) {
+        _lastUiUpdate = nowUi;
+        if (mounted) setState(() {});
       }
     });
   }
 
   Future<void> _startGPS() async {
     final bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) return;
+    if (!serviceEnabled) {
+      await _showLocationDisabledDialog();
+      return;
+    }
 
     LocationPermission permission = await Geolocator.checkPermission();
     if (permission == LocationPermission.denied) {
@@ -150,75 +196,40 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 enableWakeLock: true,
               ),
             ),
-          ).listen((Position position) {
-            // Some platforms may provide null or negative values; guard them.
-            final double? speedAccuracy = position.speedAccuracy;
-            if (speedAccuracy != null &&
-                speedAccuracy > _maxAcceptableSpeedAccuracy) {
-              return;
-            }
-
-            double rawSpeed = position.speed;
-            if (rawSpeed.isNaN || rawSpeed < 0) rawSpeed = 0.0;
-
-            final double speedKmh = rawSpeed * 3.6;
-            final double cleanSpeed = speedKmh < _speedNoiseThresholdKmh
-                ? 0.0
-                : speedKmh;
-
-            setState(() {
-              _currentSpeedKmh = cleanSpeed;
-              if (cleanSpeed > _maxSpeedKmh) _maxSpeedKmh = cleanSpeed;
-              if (_isRecording) {
-                // Record point for the current ride
-                _routeData.add({
-                  'lat': position.latitude,
-                  'lng': position.longitude,
-                  'speed': cleanSpeed,
-                });
-                if (cleanSpeed > _rideTopSpeedKmh) {
-                  _rideTopSpeedKmh = cleanSpeed;
-                }
+          ).listen(
+            (Position position) {
+              // Some platforms may provide null or negative values; guard them.
+              final speedAccuracy = position.speedAccuracy;
+              if (speedAccuracy != null &&
+                  speedAccuracy > _maxAcceptableSpeedAccuracy) {
+                return;
               }
-            });
-          });
-    }
-  }
 
-  void _startRide() {
-    setState(() {
-      _isRecording = true;
-      _routeData.clear();
-      _rideTopSpeedKmh = 0.0;
-      _rideMaxLeanAngle = 0.0;
-      _maxSpeedKmh = 0.0;
-    });
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Ride started — recording data')),
-    );
-  }
+              double rawSpeed = position.speed;
+              if (rawSpeed.isNaN || rawSpeed < 0) rawSpeed = 0.0;
 
-  Future<void> _stopRide() async {
-    setState(() => _isRecording = false);
+              final double speedKmh = rawSpeed * 3.6;
+              final double cleanSpeed = speedKmh < _speedNoiseThresholdKmh
+                  ? 0.0
+                  : speedKmh;
 
-    // Persist to local DB
-    try {
-      await DatabaseHelper.instance.insertRide(
-        topSpeed: _rideTopSpeedKmh,
-        maxLean: _rideMaxLeanAngle,
-        routeData: List<Map<String, double>>.from(_routeData),
-      );
+              // Update tracker then reflect values into state for UI
+              _speedTracker.update(cleanSpeed);
+              setState(() {
+                _currentSpeedKmh = _speedTracker.current;
+              });
 
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Ride saved locally')));
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Failed to save ride: $e')));
+              // Let the recorder handle position updates when recording
+              _rideRecorder.recordPosition(position, cleanSpeed);
+            },
+            onError: (err) async {
+              if (err is PlatformException &&
+                  err.code == 'LOCATION_SERVICES_DISABLED') {
+                if (_rideRecorder.isRecording) await _stopRide();
+                await _showLocationDisabledDialog();
+              }
+            },
+          );
     }
   }
 
@@ -245,7 +256,56 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   void _resetMaxSpeed() {
-    setState(() => _maxSpeedKmh = 0.0);
+    setState(() => _speedTracker.reset());
+  }
+
+  void _toggleRecording() async {
+    if (_rideRecorder.isRecording) {
+      await _stopRide();
+      // _stopRide clears timers/state
+    } else {
+      _startRide();
+      _recordStartTime = DateTime.now();
+      _recordTimer?.cancel();
+      _recordTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (!mounted) return;
+        setState(() {});
+      });
+    }
+  }
+
+  Future<void> _showLocationDisabledDialog() async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Location Services Disabled'),
+          content: const Text(
+            'Location services are disabled. Enable them to record rides and receive speed updates.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Dismiss'),
+            ),
+            TextButton(
+              onPressed: () async {
+                Navigator.of(context).pop();
+                await Geolocator.openLocationSettings();
+              },
+              child: const Text('Open Settings'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  String _formatDuration(Duration d) {
+    final minutes = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final seconds = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$minutes:$seconds';
   }
 
   @override
@@ -292,10 +352,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     onCalibrate: _calibrateZero,
                     onMountingModeChanged: _onMountingModeChanged,
                     onFlipHandlebarDirection: _flipHandlebarDirection,
+                    isRecording: _rideRecorder.isRecording,
+                    recordingLabel:
+                        _rideRecorder.isRecording && _recordStartTime != null
+                        ? _formatDuration(
+                            DateTime.now().difference(_recordStartTime!),
+                          )
+                        : 'REC',
+                    onToggleRecording: _toggleRecording,
                   ),
                   SpeedFace(
                     currentSpeedKmh: _currentSpeedKmh,
-                    maxSpeedKmh: _maxSpeedKmh,
+                    maxSpeedKmh: _speedTracker.max,
                     onResetMax: _resetMaxSpeed,
                   ),
                 ],
@@ -309,28 +377,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   children: List.generate(2, _buildDot),
                 ),
               ),
-              Positioned(
-                bottom: 70,
-                left: 0,
-                right: 0,
-                child: Center(
-                  child: FloatingActionButton(
-                    mini: true,
-                    backgroundColor: _isRecording
-                        ? Colors.redAccent
-                        : Colors.green,
-                    onPressed: () async {
-                      if (_isRecording) {
-                        await _stopRide();
-                      } else {
-                        _startRide();
-                      }
-                    },
-                    child: Icon(_isRecording ? Icons.stop : Icons.play_arrow),
-                    tooltip: _isRecording ? 'Stop ride' : 'Start ride',
-                  ),
-                ),
-              ),
+              // HUD moved into LeanFace to avoid overlaying the face
             ],
           ),
         );
