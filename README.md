@@ -51,10 +51,12 @@ The project includes a standalone `LowPassFilter` class in the utilities' direct
 
 1. **Build**:
    ```sh
-   flutter build apk --release
+   flutter build apk --flavor watch -t lib/main_watch.dart --release
+   flutter build apk --flavor mobile -t lib/main_mobile.dart --release
    ```
 2. **Deploy**:
    ```sh
+   adb pair <WATCH_IP>:<PORT>
    adb connect <WATCH_IP>:<PORT>
    adb install build/app/outputs/flutter-apk/app-release.apk
    ```
