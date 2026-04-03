@@ -64,7 +64,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Timer? _recordTimer;
 
   static const double _speedNoiseThresholdKmh = 1.5;
-  static const double _maxAcceptableSpeedAccuracy = 1.0;
+  // Allow somewhat looser speed accuracy: many devices report >1m/s.
+  // Only reject updates when the platform actually reports a (non-null)
+  // speedAccuracy value that exceeds this threshold.
+  static const double _maxAcceptableSpeedAccuracy = 5.0;
 
   //Lean correction controller
   final LeanCorrector _leanCorrector = LeanCorrector();
@@ -219,8 +222,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
               // Some platforms may provide null or negative values; guard them.
               //To correct the lean angle using the GPS data, we need to feed the current position into the lean corrector. This allows it to compute the GPS-derived lean angle and update its correction offset when in a steady turn.
               _leanCorrector.updatePosition(position);
-              final double speedAccuracy = position.speedAccuracy;
-              if (speedAccuracy > _maxAcceptableSpeedAccuracy) {
+              final double? speedAccuracy = position.speedAccuracy;
+              // If the platform reports a speedAccuracy and it's worse than
+              // our threshold, ignore this noisy update. If the value is
+              // null/zero/unknown we accept the reading.
+              if (speedAccuracy != null &&
+                  speedAccuracy > _maxAcceptableSpeedAccuracy) {
                 return;
               }
 

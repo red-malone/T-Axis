@@ -8,7 +8,6 @@ import 'package:geolocator/geolocator.dart';
 /// - At speed, in steady turn: compute physics-based lean from GPS, then
 ///   learn the wrist offset to apply as a correction factor
 /// - During transients: use the last-known correction factor with raw IMU
-///
 /// The GPS-derived lean angle in a coordinated turn:
 ///   θ_true = atan(v² / (r × g))
 /// where v = speed, r = turn radius, g = 9.81
