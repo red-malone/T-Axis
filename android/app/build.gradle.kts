@@ -42,7 +42,8 @@ android {
             // the existing google-services.json client entry.
             applicationId = "com.example.t_axis"
             versionNameSuffix = "-watch"
-            // Wear OS strictly requires at least SDK 23
+            // Wear OS strictly requires at least SDK 23.
+            // Ensure the watch flavor has a minimum SDK of 23.
             minSdk = flutter.minSdkVersion
         }
         create("mobile") {

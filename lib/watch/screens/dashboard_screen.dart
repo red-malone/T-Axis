@@ -24,7 +24,8 @@ class DashboardScreen extends StatefulWidget {
   State<DashboardScreen> createState() => _DashboardScreenState();
 }
 
-class _DashboardScreenState extends State<DashboardScreen> {
+class _DashboardScreenState extends State<DashboardScreen>
+    with WidgetsBindingObserver {
   final PageController _pageController = PageController();
   int _currentPage = 0;
 
@@ -71,6 +72,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   //Lean correction controller
   final LeanCorrector _leanCorrector = LeanCorrector();
+  // Prevent repeatedly showing the 'location disabled' dialog
+  bool _locationDialogShown = false;
 
   // -------------------------------------------------------------------------
   // Direction multiplier
@@ -127,6 +130,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _startTelemetry();
     _startGPS();
   }
@@ -192,70 +196,105 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> _startGPS() async {
-    final bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) {
-      await _showLocationDisabledDialog();
-      return;
-    }
+    try {
+      bool serviceEnabled = false;
+      try {
+        serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      } on PlatformException catch (e) {
+        if (e.code == 'LOCATION_SERVICES_DISABLED') {
+          if (!_locationDialogShown) await _showLocationDisabledDialog();
+          return;
+        }
+      }
 
-    LocationPermission permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-    }
+      if (!serviceEnabled) {
+        if (!_locationDialogShown) await _showLocationDisabledDialog();
+        return;
+      }
 
-    if (permission == LocationPermission.whileInUse ||
-        permission == LocationPermission.always) {
-      _positionSubscription =
-          Geolocator.getPositionStream(
-            locationSettings: AndroidSettings(
-              accuracy: LocationAccuracy.high,
-              distanceFilter: 0,
-              intervalDuration: const Duration(seconds: 1),
-              foregroundNotificationConfig: const ForegroundNotificationConfig(
-                notificationText: 'T-Axis is tracking your speed',
-                notificationTitle: 'Speed Tracking Active',
-                enableWakeLock: true,
+      // Services are enabled now — reset the dialog flag so it can appear
+      // again in the future if services go off.
+      _locationDialogShown = false;
+
+      LocationPermission permission = LocationPermission.denied;
+      try {
+        permission = await Geolocator.checkPermission();
+      } on PlatformException {
+        // On some platforms, permission checks may fail if services are disabled.
+        // Handle this gracefully by prompting for permissions anyway.
+        permission = LocationPermission.denied;
+      }
+
+      if (permission == LocationPermission.denied) {
+        try {
+          permission = await Geolocator.requestPermission();
+        } on PlatformException {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Location permission denied')),
+            );
+          }
+          return;
+        }
+      }
+
+      if (permission == LocationPermission.whileInUse ||
+          permission == LocationPermission.always) {
+        _positionSubscription =
+            Geolocator.getPositionStream(
+              locationSettings: AndroidSettings(
+                accuracy: LocationAccuracy.high,
+                distanceFilter: 0,
+                intervalDuration: const Duration(seconds: 1),
+                foregroundNotificationConfig:
+                    const ForegroundNotificationConfig(
+                      notificationText: 'T-Axis is tracking your speed',
+                      notificationTitle: 'Speed Tracking Active',
+                      enableWakeLock: true,
+                    ),
               ),
-            ),
-          ).listen(
-            (Position position) {
-              // Some platforms may provide null or negative values; guard them.
-              //To correct the lean angle using the GPS data, we need to feed the current position into the lean corrector. This allows it to compute the GPS-derived lean angle and update its correction offset when in a steady turn.
-              _leanCorrector.updatePosition(position);
-              final double? speedAccuracy = position.speedAccuracy;
-              // If the platform reports a speedAccuracy and it's worse than
-              // our threshold, ignore this noisy update. If the value is
-              // null/zero/unknown we accept the reading.
-              if (speedAccuracy != null &&
-                  speedAccuracy > _maxAcceptableSpeedAccuracy) {
-                return;
-              }
+            ).listen(
+              (Position position) {
+                _leanCorrector.updatePosition(position);
+                final double? speedAccuracy = position.speedAccuracy;
+                if (speedAccuracy != null &&
+                    speedAccuracy > _maxAcceptableSpeedAccuracy) {
+                  return;
+                }
 
-              double rawSpeed = position.speed;
-              if (rawSpeed.isNaN || rawSpeed < 0) rawSpeed = 0.0;
+                double rawSpeed = position.speed;
+                if (rawSpeed.isNaN || rawSpeed < 0) rawSpeed = 0.0;
 
-              final double speedKmh = rawSpeed * 3.6;
-              final double cleanSpeed = speedKmh < _speedNoiseThresholdKmh
-                  ? 0.0
-                  : speedKmh;
+                final double speedKmh = rawSpeed * 3.6;
+                final double cleanSpeed = speedKmh < _speedNoiseThresholdKmh
+                    ? 0.0
+                    : speedKmh;
 
-              // Update tracker then reflect values into state for UI
-              _speedTracker.update(cleanSpeed);
-              setState(() {
-                _currentSpeedKmh = _speedTracker.current;
-              });
+                _speedTracker.update(cleanSpeed);
+                if (mounted) {
+                  setState(() {
+                    _currentSpeedKmh = _speedTracker.current;
+                  });
+                }
 
-              // Let the recorder handle position updates when recording
-              _rideRecorder.recordPosition(position, cleanSpeed);
-            },
-            onError: (err) async {
-              if (err is PlatformException &&
-                  err.code == 'LOCATION_SERVICES_DISABLED') {
-                if (_rideRecorder.isRecording) await _stopRide();
-                await _showLocationDisabledDialog();
-              }
-            },
-          );
+                _rideRecorder.recordPosition(position, cleanSpeed);
+              },
+              onError: (err) async {
+                if (err is PlatformException &&
+                    err.code == 'LOCATION_SERVICES_DISABLED') {
+                  if (_rideRecorder.isRecording) await _stopRide();
+                  if (!_locationDialogShown)
+                    await _showLocationDisabledDialog();
+                }
+              },
+            );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to start GPS: $e')));
+      }
     }
   }
 
@@ -304,27 +343,109 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Future<void> _showLocationDisabledDialog() async {
     if (!mounted) return;
+    final maxHeight = MediaQuery.of(context).size.height * 0.6;
     await showDialog<void>(
       context: context,
       builder: (context) {
-        return AlertDialog(
-          title: const Text('Location Services Disabled'),
-          content: const Text(
-            'Location services are disabled. Enable them to record rides and receive speed updates.',
+        return Dialog(
+          insetPadding: const EdgeInsets.all(8.0),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: maxHeight),
+            child: Padding(
+              padding: const EdgeInsets.all(12.0),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final bool narrow = constraints.maxWidth < 200;
+                  return SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text(
+                          'Location Services Disabled',
+                          style: Theme.of(context).textTheme.headlineSmall,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Location services are disabled. Enable them to record rides and receive speed updates.',
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        ),
+                        const SizedBox(height: 12),
+                        if (narrow) ...[
+                          SizedBox(
+                            width: double.infinity,
+                            child: TextButton(
+                              style: TextButton.styleFrom(
+                                minimumSize: const Size(0, 36),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                ),
+                              ),
+                              onPressed: () => Navigator.of(context).pop(),
+                              child: const Text('Dismiss'),
+                            ),
+                          ),
+                          SizedBox(
+                            width: double.infinity,
+                            child: TextButton(
+                              style: TextButton.styleFrom(
+                                minimumSize: const Size(0, 36),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                ),
+                              ),
+                              onPressed: () async {
+                                Navigator.of(context).pop();
+                                await Geolocator.openLocationSettings();
+                                // The settings call may return immediately; give the
+                                // system a moment and re-check services. The
+                                // lifecycle observer will also retry when the app is
+                                // resumed, but this helps cover quick toggles.
+                                await Future.delayed(
+                                  const Duration(milliseconds: 500),
+                                );
+                                _startGPS();
+                              },
+                              child: const Text('Open Settings'),
+                            ),
+                          ),
+                        ] else ...[
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            children: [
+                              TextButton(
+                                style: TextButton.styleFrom(
+                                  minimumSize: const Size(0, 36),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                  ),
+                                ),
+                                onPressed: () => Navigator.of(context).pop(),
+                                child: const Text('Dismiss'),
+                              ),
+                              TextButton(
+                                style: TextButton.styleFrom(
+                                  minimumSize: const Size(0, 36),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                  ),
+                                ),
+                                onPressed: () async {
+                                  Navigator.of(context).pop();
+                                  await Geolocator.openLocationSettings();
+                                },
+                                child: const Text('Open Settings'),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Dismiss'),
-            ),
-            TextButton(
-              onPressed: () async {
-                Navigator.of(context).pop();
-                await Geolocator.openLocationSettings();
-              },
-              child: const Text('Open Settings'),
-            ),
-          ],
         );
       },
     );
@@ -338,11 +459,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _accelSubscription?.cancel();
     _gyroSubscription?.cancel();
     _positionSubscription?.cancel();
     _pageController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // Re-check GPS when the app returns to foreground — user may have
+      // enabled location services in system settings.
+      _startGPS();
+    }
   }
 
   Widget _buildDot(int index) {
