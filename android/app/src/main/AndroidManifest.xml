@@ -1,27 +1,69 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-        <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-        <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-        <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
-        <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-        <!-- Mark GPS as not strictly required so the app can install/run on devices
-            or emulators that lack a GPS provider (useful for watch/emulator). -->
-        <uses-feature android:name="android.hardware.location.gps" android:required="false" />
-
+ 
+    <!-- ============================================================
+         Location permissions — required by Geolocator plugin.
+         FINE gives GPS-level accuracy; COARSE is a fallback and is
+         also required by Google Play policy when requesting FINE.
+         ============================================================ -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+ 
+    <!-- ============================================================
+         Foreground service permissions — required because your
+         DashboardController uses ForegroundNotificationConfig with
+         enableWakeLock: true. Without these, the position stream
+         will silently fail or be killed when the screen turns off.
+ 
+         FOREGROUND_SERVICE is needed on API 28+.
+         FOREGROUND_SERVICE_LOCATION is needed on API 34+ (Android 14)
+         to specify the foreground service *type*.
+         ============================================================ -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+ 
+    <!-- ============================================================
+         Wake lock — keeps the CPU active while tracking. Required
+         because you set enableWakeLock: true in
+         ForegroundNotificationConfig.
+         ============================================================ -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+ 
+    <!-- ============================================================
+         Optional: ACCESS_BACKGROUND_LOCATION allows continued
+         tracking when the app is in the background. On Wear OS the
+         watch screen frequently turns off during rides, so without
+         this, GPS updates stop. Requires a separate runtime prompt
+         on Android 10+ ("Allow all the time").
+ 
+         Uncomment the line below if you want background tracking:
+         ============================================================ -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+ 
     <application
         android:label="t_axis"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:enableOnBackInvokedCallback="true">
+        <!-- ========================================================
+             Foreground service declaration — Android 14 (API 34)
+             requires you to declare the foreground service type
+             explicitly in the manifest, not just at runtime.
+             The Geolocator plugin starts a foreground service
+             internally when ForegroundNotificationConfig is provided.
+             ======================================================== -->
+        <service
+            android:name="com.baseflow.geolocator.GeolocatorService"
+            android:foregroundServiceType="location"
+            android:exported="false" />
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTop"
-            android:taskAffinity=""
             android:theme="@style/LaunchTheme"
             android:configChanges="keyboardHidden|keyboard|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:hardwareAccelerated="true"
             android:windowSoftInputMode="adjustResize"
-            android:screenOrientation="portrait">
+            >
             <meta-data
               android:name="io.flutter.embedding.android.NormalTheme"
               android:resource="@style/NormalTheme"

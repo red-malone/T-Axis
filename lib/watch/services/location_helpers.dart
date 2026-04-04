@@ -6,8 +6,12 @@ class LocationHelpers {
   /// exceptions and maps them to `false` so callers can show UI.
   static Future<bool> isLocationServiceEnabledSafe() async {
     try {
-      return await Geolocator.isLocationServiceEnabled();
+      print('Checking if location services are enabled...');
+      final bool isEnabled = await Geolocator.isLocationServiceEnabled();
+      print('Location services are enabled: $isEnabled');
+      return isEnabled;
     } on Exception {
+      print('Error occurred while checking location service status.');
       return false;
     }
   }

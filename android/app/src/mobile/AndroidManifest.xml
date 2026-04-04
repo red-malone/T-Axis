@@ -1,2 +1,13 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    </manifest>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- ============================================================
+         Mobile flavor: no special overrides needed beyond the label.
+         All permissions are inherited from the main manifest.
+         ============================================================ -->
+
+    <application
+        android:label="T-Axis"
+        tools:replace="android:label">
+    </application>
+</manifest>
