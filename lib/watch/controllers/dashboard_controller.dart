@@ -27,6 +27,11 @@ class DashboardController {
   DateTime? _lastUiUpdate;
   double _currentSpeedKmh = 0.0;
 
+  // GPS start guard — prevents concurrent startGPS calls from racing
+  // (e.g. initState + didChangeAppLifecycleState both fire before the
+  // first async check completes, causing duplicate dialogs).
+  bool _isGpsStarting = false;
+
   // Settings
   double directionMultiplier = 1.0;
   bool applyLeanCorrection = true;
@@ -116,6 +121,9 @@ class DashboardController {
   Future<void> startGPS({
     required Future<void> Function() onShowLocationDialog,
   }) async {
+    if (_isGpsStarting) return;
+    if (_positionSubscription != null) return; // already streaming
+    _isGpsStarting = true;
     try {
       final bool serviceEnabled =
           await LocationHelpers.isLocationServiceEnabledSafe();
@@ -214,7 +222,8 @@ class DashboardController {
                   await _positionSubscription?.cancel();
                   _positionSubscription = null;
 
-                  if (err is PlatformException) {
+                  if (err is PlatformException ||
+                      err is LocationServiceDisabledException) {
                     await onShowLocationDialog();
                   }
                 } catch (_) {}
@@ -233,6 +242,8 @@ class DashboardController {
       }
     } catch (e) {
       print('[T-Axis GPS] → Unexpected top-level error: $e');
+    } finally {
+      _isGpsStarting = false;
     }
   }
 

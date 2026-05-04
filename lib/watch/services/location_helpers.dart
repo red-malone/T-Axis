@@ -1,4 +1,5 @@
 // Small helpers to reduce location-related logic in UI classes.
+import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 
 class LocationHelpers {
@@ -10,9 +11,21 @@ class LocationHelpers {
       final bool isEnabled = await Geolocator.isLocationServiceEnabled();
       print('Location services are enabled: $isEnabled');
       return isEnabled;
-    } on Exception {
-      print('Error occurred while checking location service status.');
-      return false;
+    } on PlatformException catch (e) {
+      if (e.code == 'LOCATION_SERVICES_DISABLED') {
+        // Geolocator on Wear OS throws this instead of returning false
+        // when location services are genuinely off. Treat it as disabled.
+        print('isLocationServiceEnabled: services disabled (${e.code})');
+        return false;
+      }
+      // Other platform errors (no GPS hardware, API unsupported on this
+      // Wear OS build) — proceed optimistically; the stream will fail
+      // naturally if GPS is truly unavailable.
+      print('isLocationServiceEnabled threw ($e) — assuming enabled.');
+      return true;
+    } on Exception catch (e) {
+      print('isLocationServiceEnabled threw ($e) — assuming enabled.');
+      return true;
     }
   }
 
