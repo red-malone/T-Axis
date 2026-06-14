@@ -1,5 +1,7 @@
+import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:t_axis/core/utilities/db_helper.dart';
+import 'package:t_axis/core/services/firebase_sync.dart';
 
 class RideRecorder {
   bool _isRecording = false;
@@ -21,11 +23,22 @@ class RideRecorder {
 
   Future<void> stop() async {
     _isRecording = false;
-    await DatabaseHelper.instance.insertRide(
+    final int id = await DatabaseHelper.instance.insertRide(
       topSpeed: _topSpeed,
       maxLean: _maxLean,
       routeData: List<Map<String, double>>.from(_routeData),
     );
+
+    // Try to sync immediately when a ride is stopped. If sync fails we
+    // leave the row marked as unsynced; the next stop or a manual sync
+    // attempt will retry.
+    try {
+      await FirebaseSync().syncUnsyncedRides();
+    } catch (e) {
+      if (kDebugMode) {
+        print('[RideRecorder] Failed to sync after stop for ride $id: $e');
+      }
+    }
   }
 
   void recordAngle(double displayAngle) {

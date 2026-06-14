@@ -31,30 +31,25 @@ android {
         versionName = flutter.versionName
     }
 
-    // 1. Add the flavor dimension
-    flavorDimensions += "platform"
-
-    // 2. Define the Watch and Mobile flavors using Kotlin DSL syntax
-    productFlavors {
-        create("watch") {
-            dimension = "platform"
-            // Use the same applicationId as the base app so it matches
-            // the existing google-services.json client entry.
-            applicationId = "com.example.t_axis"
-            versionNameSuffix = "-watch"
-            // Wear OS strictly requires at least SDK 23.
-            // Ensure the watch flavor has a minimum SDK of 23.
-            minSdk = flutter.minSdkVersion
-        }
-        create("mobile") {
-            dimension = "platform"
-            // The mobile app inherits the base configurations
-        }
-    }
-
     buildTypes {
         release {
             signingConfig = signingConfigs.getByName("debug")
+        }
+    }
+
+    // Product flavors so the same codebase can build a phone companion app
+    // and a Wear OS app. The Flutter entry points (lib/main_mobile.dart,
+    // lib/main_watch.dart) and source sets (src/mobile, src/watch) map to
+    // these flavors. They share the applicationId "com.example.t_axis" so the
+    // single google-services.json (Firebase) keeps matching — the two apps run
+    // on separate devices (phone vs Wear OS), so they don't collide.
+    flavorDimensions += "device"
+    productFlavors {
+        create("mobile") {
+            dimension = "device"
+        }
+        create("watch") {
+            dimension = "device"
         }
     }
 }

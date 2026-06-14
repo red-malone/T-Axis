@@ -2,6 +2,7 @@
 import 'dart:async';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:sensors_plus/sensors_plus.dart';
@@ -127,27 +128,39 @@ class DashboardController {
     try {
       final bool serviceEnabled =
           await LocationHelpers.isLocationServiceEnabledSafe();
-      print('[T-Axis GPS] Location services enabled: $serviceEnabled');
+      if (kDebugMode) {
+        print('[T-Axis GPS] Location services enabled: $serviceEnabled');
+      }
 
       if (!serviceEnabled) {
-        print('[T-Axis GPS] → Showing location disabled dialog');
+        if (kDebugMode) {
+          print('[T-Axis GPS] → Showing location disabled dialog');
+        }
         await onShowLocationDialog();
         return;
       }
 
       LocationPermission permission =
           await LocationHelpers.checkPermissionSafe();
-      print('[T-Axis GPS] Current permission: $permission');
+      if (kDebugMode) {
+        print('[T-Axis GPS] Current permission: $permission');
+      }
 
       if (permission == LocationPermission.denied) {
-        print('[T-Axis GPS] → Requesting permission...');
+        if (kDebugMode) {
+          print('[T-Axis GPS] → Requesting permission...');
+        }
         permission = await LocationHelpers.requestPermissionSafe();
-        print('[T-Axis GPS] → After request: $permission');
+        if (kDebugMode) {
+          print('[T-Axis GPS] → After request: $permission');
+        }
       }
 
       if (permission == LocationPermission.denied ||
           permission == LocationPermission.deniedForever) {
-        print('[T-Axis GPS] → Permission denied/deniedForever, showing dialog');
+        if (kDebugMode) {
+          print('[T-Axis GPS] → Permission denied/deniedForever, showing dialog');
+        }
         await onShowLocationDialog();
         return;
       }
@@ -156,7 +169,9 @@ class DashboardController {
       await _positionSubscription?.cancel();
       _positionSubscription = null;
 
-      print('[T-Axis GPS] → Creating position stream...');
+      if (kDebugMode) {
+        print('[T-Axis GPS] → Creating position stream...');
+      }
 
       try {
         _positionSubscription =
@@ -174,13 +189,15 @@ class DashboardController {
               ),
             ).listen(
               (position) {
-                print(
+                if (kDebugMode) {
+                  print(
                   '[T-Axis GPS] Position: '
                   'lat=${position.latitude.toStringAsFixed(5)}, '
                   'lng=${position.longitude.toStringAsFixed(5)}, '
                   'speed=${position.speed.toStringAsFixed(2)} m/s, '
                   'speedAccuracy=${position.speedAccuracy}',
                 );
+                }
 
                 leanCorrector.updatePosition(position);
 
@@ -194,14 +211,15 @@ class DashboardController {
                 //   - null or 0.0 → accept (unknown accuracy, use it)
                 //   - > 10.0      → reject (genuinely unreliable)
                 // -------------------------------------------------------
-                final double? speedAccuracy = position.speedAccuracy;
-                if (speedAccuracy != null &&
-                    speedAccuracy > 0.0 &&
+                final double speedAccuracy = position.speedAccuracy;
+                if (speedAccuracy > 0.0 &&
                     speedAccuracy > 10.0) {
-                  print(
+                  if (kDebugMode) {
+                    print(
                     '[T-Axis GPS] → Skipping: speedAccuracy '
                     '$speedAccuracy > 10.0',
                   );
+                  }
                   return;
                 }
 
@@ -216,7 +234,9 @@ class DashboardController {
                 rideRecorder.recordPosition(position, cleanSpeed);
               },
               onError: (err) async {
-                print('[T-Axis GPS] Stream error: $err');
+                if (kDebugMode) {
+                  print('[T-Axis GPS] Stream error: $err');
+                }
                 try {
                   if (rideRecorder.isRecording) await stopRide();
                   await _positionSubscription?.cancel();
@@ -230,9 +250,13 @@ class DashboardController {
               },
             );
 
-        print('[T-Axis GPS] → Position stream created successfully');
+        if (kDebugMode) {
+          print('[T-Axis GPS] → Position stream created successfully');
+        }
       } catch (e) {
-        print('[T-Axis GPS] → Failed to create position stream: $e');
+        if (kDebugMode) {
+          print('[T-Axis GPS] → Failed to create position stream: $e');
+        }
         try {
           if (rideRecorder.isRecording) await stopRide();
           await _positionSubscription?.cancel();
@@ -241,7 +265,9 @@ class DashboardController {
         } catch (_) {}
       }
     } catch (e) {
-      print('[T-Axis GPS] → Unexpected top-level error: $e');
+      if (kDebugMode) {
+        print('[T-Axis GPS] → Unexpected top-level error: $e');
+      }
     } finally {
       _isGpsStarting = false;
     }
