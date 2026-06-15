@@ -35,11 +35,12 @@ class FirebaseSync {
         if (kDebugMode) {
           print('[FirebaseSync] Synced ride $id to Firestore');
         }
-      } catch (e) {
-        // Don't rethrow — we want to continue trying other rides
-        if (kDebugMode) {
-          print('[FirebaseSync] Failed to sync ride $id: $e');
-        }
+      } catch (e, st) {
+        // Don't rethrow — we want to continue trying other rides.
+        // Log unconditionally (not just in debug) so production failures
+        // such as PERMISSION_DENIED from Firestore rules are visible.
+        debugPrint('[FirebaseSync] Failed to sync ride $id: $e');
+        debugPrintStack(stackTrace: st, label: 'FirebaseSync');
       }
     }
   }
